@@ -1,9 +1,12 @@
 name: Forum Activity Monitor
 
 on:
+  # Запуск каждые 5 минут (максимально часто для GitHub)
   schedule:
-    - cron: '*/10 * * * * *'
+    - cron: '*/5 * * * *'
+  # Ручной запуск
   workflow_dispatch:
+  # Запуск при изменении кода
   push:
     branches: [ main ]
 
@@ -12,19 +15,23 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: 📥 Загружаем код
+    # 1. Загружаем код репозитория
+    - name: 📥 Checkout repository
       uses: actions/checkout@v3
       
-    - name: 🐍 Устанавливаем Python
+    # 2. Устанавливаем Python
+    - name: 🐍 Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
         
-    - name: 📦 Устанавливаем зависимости
+    # 3. Устанавливаем библиотеки
+    - name: 📦 Install dependencies
       run: |
         pip install requests beautifulsoup4
         
-    - name: 🔍 Запускаем монитор
+    # 4. Запускаем монитор
+    - name: 🔍 Run monitor
       env:
         BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
