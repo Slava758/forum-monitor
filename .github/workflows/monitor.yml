@@ -1,0 +1,31 @@
+name: Forum Activity Monitor
+
+on:
+  schedule:
+    - cron: '*/10 * * * * *'
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Загружаем код
+      uses: actions/checkout@v3
+      
+    - name: 🐍 Устанавливаем Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: 📦 Устанавливаем зависимости
+      run: |
+        pip install requests beautifulsoup4
+        
+    - name: 🔍 Запускаем монитор
+      env:
+        BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: python monitor.py
