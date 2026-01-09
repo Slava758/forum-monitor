@@ -3,16 +3,18 @@ import os
 import sys
 from datetime import datetime
 import re
-import time
+import json
+import hashlib
 
 print("=" * 60)
 print("🚀 МОНИТОР АКТИВНОСТИ GTA5RP")
 print("=" * 60)
 
-# Получаем секреты
+# Конфигурация
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 URL = "https://forum.gta5rp.com/members/adminadminov.6/"
+STATUS_FILE = "last_status.json"  # Файл для хранения последнего статуса
 
 print(f"🔧 Конфигурация:")
 print(f"  • BOT_TOKEN: {'✅ Есть' if BOT_TOKEN else '❌ НЕТ'}")
@@ -24,8 +26,41 @@ if not BOT_TOKEN or not CHAT_ID:
     print("\n❌ ОШИБКА: Не заданы токен или chat_id!")
     sys.exit(1)
 
+def load_last_status():
+    """Загружаем последний сохранённый статус"""
+    try:
+        with open(STATUS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        # Если файла нет, возвращаем пустой статус
+        return {
+            'status_text': '',
+            'status_hash': '',
+            'last_check': '',
+            'active': False
+        }
+
+def save_status(status_text, active, status_hash):
+    """Сохраняем текущий статус"""
+    status_data = {
+        'status_text': status_text,
+        'status_hash': status_hash,
+        'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'active': active
+    }
+    
+    with open(STATUS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(status_data, f, ensure_ascii=False, indent=2)
+    
+    print(f"💾 Сохранён статус: {status_text[:50]}...")
+
+def get_status_hash(status_text, active):
+    """Создаём хеш статуса для сравнения"""
+    status_string = f"{status_text}_{active}"
+    return hashlib.md5(status_string.encode('utf-8')).hexdigest()
+
 def check_activity():
-    """Проверяем активность - ТОЧНЫЙ ПОИСК"""
+    """Проверяем активность - БЕЗ ДВОЕТОЧИЯ"""
     print(f"\n🔍 Проверяем: {URL}")
     print(f"⏰ Время: {datetime.now().strftime('%H:%M:%S')}")
     
@@ -39,100 +74,52 @@ def check_activity():
         if response.status_code == 200:
             html = response.text
             
-            # Сохраняем для отладки
-            with open("debug.html", "w", encoding="utf-8") as f:
-                f.write(html[:10000])  # Первые 10000 символов
-            
             print(f"✅ Страница загружена ({len(html)} символов)")
             
             # ============================================
-            # КЛЮЧЕВОЙ ПОИСК: "Активность: Только что"
+            # ПРОВЕРКА АКТИВНОСТИ "ТОЛЬКО ЧТО"
             # ============================================
             
-            # Вариант 1: Точное совпадение "Активность: Только что"
-            if "Активность: Только что" in html:
-                print("🎯 ТОЧНОЕ СОВПАДЕНИЕ: 'Активность: Только что'")
-                
-                # Ищем что делает на форуме
-                location = find_location(html)
-                
-                if location:
-                    return {
-                        'active': True,
-                        'text': f"Активность: Только что\n{location}",
-                        'location': location
-                    }
-                else:
-                    return {
-                        'active': True,
-                        'text': "Активность: Только что (местонахождение не найдено)",
-                        'location': None
-                    }
-            
-            # Вариант 2: Поиск с разными регистрами и пробелами
-            import re
-            
-            # Паттерны для поиска активности
+            # Паттерны для поиска активности "Только что" - БЕЗ двоеточия!
             patterns = [
-                r'Активность:\s*Только что',      # с двоеточием и пробелом
-                r'Активность\s*Только что',       # без двоеточия
-                r'Активность:\s*только что',      # маленькие буквы
-                r'Активность\s*только что',       # без двоеточия, маленькие
+                r'Активность\s+Только что',       # с пробелом
+                r'Активность\s+только что',       # маленькие буквы
+                r'Активность\s*Только что',       # возможны разные пробелы
+                r'активность\s+только что',       # все маленькие
+                r'АктивностьТолько что',          # слитно
             ]
             
             for pattern in patterns:
                 match = re.search(pattern, html, re.IGNORECASE)
                 if match:
                     found_text = match.group(0)
-                    print(f"🎯 РЕГУЛЯРНОЕ ВЫРАЖЕНИЕ: '{found_text}'")
+                    print(f"🎯 АКТИВНОСТЬ ОБНАРУЖЕНА: '{found_text}'")
                     
                     # Ищем что делает на форуме
                     location = find_location(html)
                     
+                    status_text = found_text
                     if location:
-                        return {
-                            'active': True,
-                            'text': f"{found_text}\n{location}",
-                            'location': location
-                        }
-                    else:
-                        return {
-                            'active': True,
-                            'text': f"{found_text} (местонахождение не найдено)",
-                            'location': None
-                        }
-            
-            # Вариант 3: Поиск "Только что" рядом с "Активность"
-            # Ищем в пределах 50 символов
-            activity_match = re.search(r'Активность[^<]{0,50}', html, re.IGNORECASE)
-            if activity_match:
-                activity_text = activity_match.group(0)
-                if "только что" in activity_text.lower():
-                    print(f"🎯 БЛИЗКОЕ СОВПАДЕНИЕ: '{activity_text.strip()}'")
+                        status_text = f"{found_text}\n📍 {location}"
                     
-                    location = find_location(html)
-                    
-                    if location:
-                        return {
-                            'active': True,
-                            'text': f"{activity_text.strip()}\n{location}",
-                            'location': location
-                        }
-                    else:
-                        return {
-                            'active': True,
-                            'text': f"{activity_text.strip()} (местонахождение не найдено)",
-                            'location': None
-                        }
+                    return {
+                        'active': True,
+                        'text': status_text,
+                        'location': location,
+                        'type': 'activity_found'
+                    }
             
-            # Если не нашли активность "Только что", показываем текущий статус
+            # ============================================
+            # ЕСЛИ НЕ АКТИВЕН - ПОЛУЧАЕМ ТЕКУЩИЙ СТАТУС
+            # ============================================
             current_status = find_current_status(html)
             print(f"📊 Текущий статус: {current_status}")
             
             return {
                 'active': False,
                 'text': current_status,
-                'location': None
+                'location': None,
+                'type': 'status_update'
             }
             
         else:
@@ -141,7 +128,8 @@ def check_activity():
             return {
                 'active': False,
                 'text': error_msg,
-                'location': None
+                'location': None,
+                'type': 'error'
             }
             
     except Exception as e:
@@ -150,104 +138,97 @@ def check_activity():
         return {
             'active': False,
             'text': error_msg,
-            'location': None
+            'location': None,
+            'type': 'error'
         }
 
 def find_location(html):
     """Ищем где находится на форуме"""
     try:
-        # Ищем текст после активности (следующая строка или близко)
+        # Ищем текст после "Только что"
         lines = html.split('\n')
         
         for i, line in enumerate(lines):
-            if "только что" in line.lower() and "активность" in line.lower():
-                # Смотрим следующие 3 строки
-                for j in range(i+1, min(i+4, len(lines))):
+            line_lower = line.lower()
+            if "только что" in line_lower:
+                # Смотрим следующие 2 строки
+                for j in range(i+1, min(i+3, len(lines))):
                     next_line = lines[j].strip()
+                    if not next_line:
+                        continue
+                    
                     # Убираем HTML теги
                     clean_line = re.sub('<[^<]+?>', '', next_line).strip()
-                    if clean_line and len(clean_line) > 5:
-                        # Проверяем что это не пустая строка и не техническая информация
-                        if not clean_line.startswith(('{', '[', '<', 'http')):
-                            print(f"📍 Найдено местонахождение: '{clean_line[:100]}'")
-                            return clean_line
-                
-                # Если в следующих строках не нашли, ищем в той же строке после "Только что"
-                line_text = re.sub('<[^<]+?>', '', line).strip()
-                parts = line_text.split('Только что')
-                if len(parts) > 1 and parts[1].strip():
-                    location = parts[1].strip()
-                    print(f"📍 Местонахождение в той же строке: '{location[:100]}'")
-                    return location
+                    
+                    # Проверяем что это не техническая информация
+                    if (clean_line and len(clean_line) > 3 and 
+                        not clean_line.startswith(('{', '[', '<', 'http', '//'))):
+                        return clean_line[:150]
         
-        print("ℹ️ Местонахождение не найдено")
         return None
         
-    except Exception as e:
-        print(f"Ошибка поиска местонахождения: {e}")
+    except:
         return None
 
 def find_current_status(html):
-    """Находим текущий статус активности"""
+    """Находим текущий статус активности - БЕЗ ДВОЕТОЧИЯ"""
     try:
-        # Ищем любую информацию об активности
+        # Ищем БЕЗ двоеточия
         patterns = [
-            r'Активность[^<]*',          # Активность что-то
-            r'Последняя активность[^<]*', # Последняя активность
-            r'Был\(а\) на сайте[^<]*',    # Был(а) на сайте
-            r'Заходил\(а\)[^<]*',         # Заходил(а)
+            r'Активность\s+Вчера[^<]*',      # Активность Вчера в ...
+            r'Активность\s+Сегодня[^<]*',    # Активность Сегодня в ...
+            r'Активность\s+\d+[^<]*',        # Активность [число] ...
+            r'Активность\s+[^<]{5,100}',     # Активность что-то
         ]
         
         for pattern in patterns:
             match = re.search(pattern, html, re.IGNORECASE)
             if match:
                 status = match.group(0)
-                # Чистим от HTML тегов
                 clean_status = re.sub('<[^<]+?>', '', status).strip()
-                if clean_status:
+                clean_status = ' '.join(clean_status.split())
+                
+                if clean_status and len(clean_status) > len("Активность") + 3:
                     return clean_status
         
-        return "Не удалось определить активность"
+        # Если не нашли, возвращаем общее
+        return "Активность не определена"
         
     except:
-        return "Ошибка определения статуса"
+        return "Активность (ошибка определения)"
 
-def send_to_telegram(result):
-    """Отправляем в Telegram"""
+def send_telegram_message(message, is_alert=False):
+    """Отправляем сообщение в Telegram"""
     try:
         current_time = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
         
-        if result['active']:
+        if is_alert:
             # УВЕДОМЛЕНИЕ ОБ АКТИВНОСТИ
             telegram_msg = f"""
 <b>🚨 АКТИВНОСТЬ ОБНАРУЖЕНА!</b>
 
 📅 <b>Время:</b> {current_time}
-🔗 <b>Ссылка:</b> {URL}
+🔗 <b>Ссылка:</b> <a href="{URL}">{URL}</a>
 
 📊 <b>Статус:</b>
-<code>{result['text']}</code>
+<code>{message}</code>
 
 🎯 <b>Пользователь в сети!</b>
 
 #мониторинг #активность
 """
         else:
-            # ТЕСТОВОЕ УВЕДОМЛЕНИЕ
+            # ОБЫЧНОЕ УВЕДОМЛЕНИЕ О ИЗМЕНЕНИИ
             telegram_msg = f"""
-<b>🔄 Проверка монитора</b>
+<b>📊 Статус изменился</b>
 
 📅 <b>Время:</b> {current_time}
-🔗 <b>Ссылка:</b> {URL}
+🔗 <b>Ссылка:</b> <a href="{URL}">{URL}</a>
 
-📊 <b>Текущий статус:</b>
-<code>{result['text']}</code>
+📝 <b>Новый статус:</b>
+<code>{message}</code>
 
-✅ Монитор работает.
-При обнаружении "Активность: Только что"
-будет отправлено уведомление.
-
-#мониторинг #проверка
+#мониторинг #статус
 """
         
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -261,41 +242,95 @@ def send_to_telegram(result):
         response = requests.post(url, json=payload, timeout=10)
         
         if response.status_code == 200:
-            print(f"✅ Сообщение отправлено в Telegram!")
+            print(f"✅ Сообщение отправлено!")
             return True
         else:
             print(f"❌ Ошибка отправки: {response.status_code}")
-            print(f"Ответ: {response.text}")
             return False
             
     except Exception as e:
         print(f"❌ Ошибка Telegram: {e}")
         return False
 
-# Основная программа
-if __name__ == "__main__":
+def main():
+    """Основная логика с отслеживанием изменений"""
     print("\n" + "=" * 60)
     
-    result = check_activity()
+    # Загружаем предыдущий статус
+    last_status = load_last_status()
+    print(f"📝 Предыдущий статус: {last_status['status_text'][:80] if last_status['status_text'] else 'Нет данных'}")
+    print(f"   Последняя проверка: {last_status['last_check']}")
+    print(f"   Был активен: {'✅ Да' if last_status['active'] else '❌ Нет'}")
     
-    print(f"\n📊 Результат проверки:")
-    print(f"  • Активен: {'✅ ДА' if result['active'] else '❌ НЕТ'}")
-    print(f"  • Текст: {result['text'][:100]}...")
-    if result['location']:
-        print(f"  • Местонахождение: {result['location'][:100]}...")
+    # Проверяем текущую активность
+    current_result = check_activity()
     
-    print("\n📨 Отправляем в Telegram...")
+    # Создаём хеш текущего статуса
+    current_hash = get_status_hash(current_result['text'], current_result['active'])
     
-    # Отправляем всегда (тест при запуске, уведомление при активности)
-    success = send_to_telegram(result)
+    print(f"\n📊 Текущая проверка:")
+    print(f"  • Активен: {'✅ Да' if current_result['active'] else '❌ Нет'}")
+    print(f"  • Статус: {current_result['text'][:100]}...")
+    print(f"  • Хеш статуса: {current_hash}")
     
-    if success:
-        if result['active']:
-            print("✅ УВЕДОМЛЕНИЕ ОБ АКТИВНОСТИ ОТПРАВЛЕНО!")
+    # Сравниваем с предыдущим статусом
+    status_changed = current_hash != last_status['status_hash']
+    
+    print(f"\n⚖️  Сравнение:")
+    print(f"  • Статус изменился: {'✅ ДА' if status_changed else '❌ НЕТ'}")
+    print(f"  • Предыдущий хеш: {last_status['status_hash']}")
+    print(f"  • Текущий хеш: {current_hash}")
+    
+    # ============================================
+    # ЛОГИКА ОТПРАВКИ СООБЩЕНИЙ
+    # ============================================
+    
+    send_message = False
+    message_type = "status_change"  # или "activity_alert"
+    
+    if status_changed:
+        # Статус изменился
+        if current_result['active']:
+            # Обнаружена активность "Только что"
+            print("\n🚨 ОБНАРУЖЕНА НОВАЯ АКТИВНОСТЬ!")
+            send_message = True
+            message_type = "activity_alert"
         else:
-            print("✅ Тестовое сообщение отправлено!")
+            # Изменился обычный статус (Вчера/Сегодня/другое)
+            print("\n📊 Статус изменился (не активность)")
+            send_message = True
+            message_type = "status_change"
     else:
-        print("❌ Не удалось отправить сообщение")
+        # Статус не изменился
+        print("\nℹ️ Статус не изменился")
+        
+        # Если это первая проверка (нет предыдущего статуса)
+        if not last_status['status_text']:
+            print("📝 Первая проверка - отправляем приветственное сообщение")
+            send_message = True
+            message_type = "first_check"
+    
+    # Отправляем сообщение если нужно
+    if send_message:
+        print(f"\n📨 Отправляем сообщение в Telegram...")
+        
+        if message_type == "activity_alert":
+            success = send_telegram_message(current_result['text'], is_alert=True)
+        else:
+            success = send_telegram_message(current_result['text'], is_alert=False)
+        
+        if success:
+            print("✅ Сообщение отправлено!")
+        else:
+            print("❌ Не удалось отправить сообщение")
+    else:
+        print("\n📭 Сообщение НЕ отправляется (статус не изменился)")
+    
+    # Сохраняем текущий статус
+    save_status(current_result['text'], current_result['active'], current_hash)
     
     print("\n" + "=" * 60)
-    print("✅ Скрипт завершен")
+    print("✅ Проверка завершена")
+
+if __name__ == "__main__":
+    main()
