@@ -57,121 +57,148 @@ def get_status_hash(status_text, active):
     status_string = f"{status_text}_{active}"
     return hashlib.md5(status_string.encode('utf-8')).hexdigest()
 
-def analyze_page_structure(html):
-    """Анализирует структуру страницы для поиска активности"""
-    print(f"\n📐 Анализ структуры страницы:")
+def extract_activity_from_html(html):
+    """Извлекаем информацию об активности ИЗ ПРАВИЛЬНОГО МЕСТА"""
+    print(f"\n🎯 Ищем блок активности...")
     
-    # Ищем все "Активность" в любом регистре
-    all_matches = list(re.finditer(r'Активность', html, re.IGNORECASE))
-    
-    if not all_matches:
-        print("❌ Слово 'Активность' не найдено на странице!")
-        
-        # Ищем альтернативы
-        alternatives = ['активность', 'АКТИВНОСТЬ', 'Active', 'active', 'онлайн', 'Online', 'последн', 'визит']
-        for alt in alternatives:
-            if alt in html.lower():
-                print(f"✅ Найдено альтернативное: '{alt}'")
-        
-        # Покажем часть HTML где может быть информация
-        print("\n🔍 Показываю часть HTML (первые 5000 символов):")
-        print(html[:5000])
-        return None
-    
-    print(f"✅ Найдено {len(all_matches)} вхождений 'Активность'")
-    
-    # Анализируем первые 5 вхождений
-    for i, match in enumerate(all_matches[:5]):
-        start = max(0, match.start() - 100)
-        end = min(len(html), match.end() + 200)
-        context = html[start:end]
-        
-        # Чистим HTML
-        clean_context = re.sub('<[^<]+?>', ' ', context)
-        clean_context = ' '.join(clean_context.split())
-        
-        print(f"\n--- Совпадение #{i+1} ---")
-        print(f"Позиция в HTML: {match.start()}")
-        print(f"Текст: '{clean_context[:300]}...'")
-        
-        # Проверяем есть ли "Вчера" или "Сегодня" или "Только что"
-        if 'вчера' in clean_context.lower():
-            print("📅 Содержит: 'Вчера'")
-        if 'сегодня' in clean_context.lower():
-            print("📅 Содержит: 'Сегодня'")
-        if 'только что' in clean_context.lower():
-            print("🎯 Содержит: 'Только что'")
-    
-    return all_matches
-
-def find_current_status(html):
-    """Находим текущий статус активности"""
     try:
-        print(f"\n🔎 Поиск статуса активности...")
+        # ============================================
+        # СПОСОБ 1: Ищем по структуре XenForo
+        # ============================================
         
-        # 1. Сначала ищем простым способом
-        if "Активность" in html:
-            # Ищем строку с активностью (200 символов после)
-            lines = html.split('\n')
-            for line in lines:
-                if "Активность" in line:
-                    # Убираем HTML теги
-                    clean_line = re.sub('<[^<]+?>', ' ', line)
-                    clean_line = ' '.join(clean_line.split())
-                    
-                    if len(clean_line) > 15 and "Активность" in clean_line:
-                        print(f"✅ Найден в строке: '{clean_line[:150]}...'")
-                        return clean_line
-        
-        # 2. Ищем по паттернам
-        patterns = [
-            r'Активность[^<]{10,150}',  # Активность + 10-150 символов
-            r'активность[^<]{10,150}',  # маленькими
-            r'Последняя активность[^<]{5,100}',
-            r'был\(а\) на сайте[^<]{5,100}',
-            r'Заходил\(а\)[^<]{5,100}',
+        # Паттерны для блоков с информацией пользователя
+        user_info_patterns = [
+            r'<dl[^>]*class="[^"]*pairs[^"]*"[^>]*>.*?</dl>',  # блоки пар ключ-значение
+            r'<div[^>]*class="[^"]*memberHeader-info[^"]*"[^>]*>.*?</div>',  # header info
+            r'<div[^>]*class="[^"]*userTitle[^"]*"[^>]*>.*?</div>',  # user title
         ]
         
-        for pattern in patterns:
-            matches = re.findall(pattern, html, re.IGNORECASE)
+        for pattern in user_info_patterns:
+            matches = re.findall(pattern, html, re.IGNORECASE | re.DOTALL)
             if matches:
-                for match in matches:
-                    clean = re.sub('<[^<]+?>', ' ', match).strip()
-                    clean = ' '.join(clean.split())
-                    if clean and len(clean) > 15:
-                        print(f"✅ Найден паттерном: '{clean[:150]}...'")
-                        return clean
+                print(f"✅ Найдены блоки информации ({len(matches)} шт)")
+                
+                for block in matches:
+                    # Ищем внутри блока "Активность"
+                    if 'активность' in block.lower():
+                        print(f"📦 Найден блок с активностью")
+                        
+                        # Извлекаем текст всего блока
+                        block_text = re.sub('<[^<]+?>', ' ', block)
+                        block_text = ' '.join(block_text.split())
+                        
+                        print(f"   Блок: {block_text[:200]}...")
+                        
+                        # Ищем строку с активностью
+                        lines = block_text.split('.')
+                        for line in lines:
+                            if 'активность' in line.lower():
+                                clean_line = line.strip()
+                                if len(clean_line) > 10:
+                                    return clean_line
         
-        # 3. Если не нашли - анализируем структуру
-        analyze_page_structure(html)
+        # ============================================
+        # СПОСОБ 2: Ищем по разметке XenForo pairs
+        # ============================================
         
-        # 4. Последняя попытка: ищем любую информацию о времени
-        time_patterns = [
-            r'\d{1,2}:\d{2}',  # время 12:34
-            r'Вчера',
-            r'Сегодня',
-            r'Только что',
-            r'\d+ \w+ \d{4}',  # 15 января 2024
-        ]
+        # Ищем все <dt> и <dd> пары
+        dt_matches = list(re.finditer(r'<dt[^>]*>(.*?)</dt>', html, re.IGNORECASE | re.DOTALL))
+        dd_matches = list(re.finditer(r'<dd[^>]*>(.*?)</dd>', html, re.IGNORECASE | re.DOTALL))
         
-        # Ищем блоки с временем
-        for i in range(len(html) - 200):
-            snippet = html[i:i+200]
-            has_time = any(re.search(pattern, snippet) for pattern in time_patterns)
-            has_activity = 'активн' in snippet.lower()
+        if dt_matches and dd_matches:
+            print(f"✅ Найдены dt/dd пары: {len(dt_matches)} dt, {len(dd_matches)} dd")
             
-            if has_time and has_activity:
-                clean_snippet = re.sub('<[^<]+?>', ' ', snippet).strip()
-                clean_snippet = ' '.join(clean_snippet.split())
-                if len(clean_snippet) > 20:
-                    print(f"⏰ Найден временной блок: '{clean_snippet[:150]}...'")
-                    return clean_snippet
+            # Ищем пару где <dt> содержит "Активность"
+            for i, dt_match in enumerate(dt_matches):
+                dt_text = re.sub('<[^<]+?>', '', dt_match.group(1)).strip()
+                
+                if 'активность' in dt_text.lower():
+                    print(f"🎯 Найден dt с 'Активность': '{dt_text}'")
+                    
+                    # Берём соответствующий <dd>
+                    if i < len(dd_matches):
+                        dd_text = re.sub('<[^<]+?>', '', dd_matches[i].group(1)).strip()
+                        result = f"{dt_text}: {dd_text}"
+                        print(f"   Соответствующий dd: '{dd_text}'")
+                        return result
         
-        return "Активность: Не удалось определить"
+        # ============================================
+        # СПОСОБ 3: Ищем строку с активностью ПОСЛЕ регистрации
+        # ============================================
+        
+        # Ищем "Регистрация" и берём текст ПОСЛЕ неё
+        reg_pattern = r'Регистрация[^<]{10,150}'
+        reg_match = re.search(reg_pattern, html, re.IGNORECASE)
+        
+        if reg_match:
+            reg_end = reg_match.end()
+            print(f"✅ Найдена регистрация, позиция окончания: {reg_end}")
+            
+            # Берём текст после регистрации (500 символов)
+            after_reg = html[reg_end:reg_end + 500]
+            
+            # Ищем в этом тексте "Активность"
+            activity_pattern = r'Активность[^<]{10,150}'
+            activity_match = re.search(activity_pattern, after_reg, re.IGNORECASE)
+            
+            if activity_match:
+                activity_text = activity_match.group(0)
+                clean_activity = re.sub('<[^<]+?>', ' ', activity_text).strip()
+                clean_activity = ' '.join(clean_activity.split())
+                print(f"✅ Найдена активность после регистрации: '{clean_activity}'")
+                return clean_activity
+        
+        # ============================================
+        # СПОСОБ 4: Простой поиск по ключевым словам
+        # ============================================
+        
+        # Разбиваем HTML на строки
+        lines = html.split('\n')
+        
+        for i, line in enumerate(lines):
+            line_lower = line.lower()
+            
+            # Ищем строку с активностью
+            if 'активность' in line_lower and ('вчера' in line_lower or 'сегодня' in line_lower or 'только что' in line_lower or ':' in line_lower):
+                # Чистим HTML
+                clean_line = re.sub('<[^<]+?>', ' ', line).strip()
+                clean_line = ' '.join(clean_line.split())
+                
+                if len(clean_line) > 10:
+                    print(f"✅ Найдена в строке #{i}: '{clean_line}'")
+                    return clean_line
+        
+        # ============================================
+        # СПОСОБ 5: Ищем блок memberHeader-main
+        # ============================================
+        
+        # На XenForo активность часто в memberHeader-main
+        header_pattern = r'<div[^>]*class="[^"]*memberHeader-main[^"]*"[^>]*>.*?</div>'
+        header_match = re.search(header_pattern, html, re.IGNORECASE | re.DOTALL)
+        
+        if header_match:
+            header_html = header_match.group(0)
+            print("✅ Найден memberHeader-main блок")
+            
+            # Ищем в нём активность
+            if 'активность' in header_html.lower():
+                # Извлекаем текст
+                header_text = re.sub('<[^<]+?>', ' ', header_html).strip()
+                header_text = ' '.join(header_text.split())
+                
+                # Берём часть с активностью
+                for sentence in header_text.split('.'):
+                    if 'активность' in sentence.lower():
+                        clean_sentence = sentence.strip()
+                        if len(clean_sentence) > 10:
+                            return clean_sentence
+        
+        print("❌ Активность не найдена в HTML")
+        return "Активность не определена"
         
     except Exception as e:
-        print(f"❌ Ошибка поиска: {e}")
-        return f"Активность: Ошибка"
+        print(f"❌ Ошибка извлечения: {e}")
+        return f"Ошибка: {str(e)[:50]}"
 
 def check_activity():
     """Проверяем активность"""
@@ -191,54 +218,40 @@ def check_activity():
             
             # Сохраняем HTML для отладки
             with open("debug_page.html", "w", encoding="utf-8") as f:
-                f.write(html[:10000])
+                f.write(html)
             print("💾 HTML сохранён в debug_page.html")
             
             # ============================================
-            # ПОИСК "ТОЛЬКО ЧТО" (активность онлайн)
+            # ПОИСК АКТИВНОСТИ "ТОЛЬКО ЧТО" (онлайн)
             # ============================================
             
-            # Ищем "Только что" в любом регистре
-            if re.search(r'Только что', html, re.IGNORECASE):
-                print("🎯 Найдено 'Только что' на странице")
+            # Сначала извлекаем информацию об активности
+            activity_text = extract_activity_from_html(html)
+            print(f"\n📊 Извлечённая активность: '{activity_text}'")
+            
+            # Проверяем если "Только что"
+            if activity_text and 'только что' in activity_text.lower():
+                print("🎯 ОБНАРУЖЕНА АКТИВНОСТЬ 'ТОЛЬКО ЧТО'!")
                 
-                # Ищем контекст с "Активность"
-                pattern = r'Активность[^<]{0,50}Только что'
-                match = re.search(pattern, html, re.IGNORECASE)
-                
-                if match:
-                    found_text = match.group(0)
-                    clean_text = re.sub('<[^<]+?>', ' ', found_text).strip()
-                    clean_text = ' '.join(clean_text.split())
-                    
-                    print(f"✅ Найдена активность: '{clean_text}'")
-                    
-                    # Ищем местонахождение
-                    location = find_location(html)
-                    if location:
-                        return {
-                            'active': True,
-                            'text': f"{clean_text}\n📍 {location}",
-                            'location': location
-                        }
-                    else:
-                        return {
-                            'active': True,
-                            'text': clean_text,
-                            'location': None
-                        }
+                # Ищем местонахождение
+                location = find_location(html)
+                if location:
+                    return {
+                        'active': True,
+                        'text': f"{activity_text}\n📍 {location}",
+                        'location': location
+                    }
                 else:
-                    # Если "Только что" есть, но не рядом с "Активность"
-                    print("⚠️ 'Только что' найдено, но не рядом с 'Активность'")
+                    return {
+                        'active': True,
+                        'text': activity_text,
+                        'location': None
+                    }
             
-            # ============================================
-            # ЕСЛИ НЕ ОНЛАЙН - ПОЛУЧАЕМ ТЕКУЩИЙ СТАТУС
-            # ============================================
-            current_status = find_current_status(html)
-            
+            # Если не онлайн
             return {
                 'active': False,
-                'text': current_status,
+                'text': activity_text if activity_text else "Активность не найдена",
                 'location': None
             }
             
@@ -263,19 +276,21 @@ def check_activity():
 def find_location(html):
     """Ищем где находится на форуме"""
     try:
-        # Ищем после "Только что"
+        # После "Только что" часто идёт информация что просматривает
         lines = html.split('\n')
         
         for i, line in enumerate(lines):
             if "только что" in line.lower():
-                # Смотрим следующие 3 строки
+                # Смотрим следующие 2-3 строки
                 for j in range(i+1, min(i+4, len(lines))):
                     next_line = lines[j].strip()
                     if next_line:
                         clean = re.sub('<[^<]+?>', ' ', next_line).strip()
                         clean = ' '.join(clean.split())
                         if clean and len(clean) > 5:
-                            return clean[:200]
+                            # Проверяем что это не технический текст
+                            if not clean.startswith(('{', '[', 'http', '//')):
+                                return clean[:200]
         
         return None
     except:
