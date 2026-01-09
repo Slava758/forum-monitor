@@ -4,7 +4,6 @@ import sys
 from datetime import datetime
 import re
 import json
-import hashlib
 
 print("=" * 60)
 print("🚀 МОНИТОР АКТИВНОСТИ GTA5RP")
@@ -14,7 +13,7 @@ print("=" * 60)
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 URL = "https://forum.gta5rp.com/members/adminadminov.6/"
-STATUS_FILE = "last_status.json"
+STATUS_FILE = "last_activity.txt"  # Простой текстовый файл
 
 print(f"🔧 Конфигурация:")
 print(f"  • BOT_TOKEN: {'✅ Есть' if BOT_TOKEN else '❌ НЕТ'}")
@@ -25,147 +24,95 @@ if not BOT_TOKEN or not CHAT_ID:
     print("\n❌ ОШИБКА: Не заданы токен или chat_id!")
     sys.exit(1)
 
-def load_last_status():
-    """Загружаем последний сохранённый статус"""
+def extract_activity_essence(html):
+    """Извлекаем СУТЬ активности: день + время"""
     try:
-        with open(STATUS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except:
-        return {
-            'status_text': '',
-            'status_hash': '',
-            'last_check': '',
-            'active': False
-        }
-
-def save_status(status_text, active, status_hash):
-    """Сохраняем текущий статус"""
-    status_data = {
-        'status_text': status_text,
-        'status_hash': status_hash,
-        'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'active': active
-    }
-    
-    with open(STATUS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(status_data, f, ensure_ascii=False, indent=2)
-    
-    print(f"💾 Сохранён статус: '{status_text[:50]}...'")
-
-def extract_pure_activity_text(html):
-    """Извлекаем ЧИСТЫЙ текст активности (без HTML, без лишнего)"""
-    print(f"\n🎯 Извлекаем чистый текст активности...")
-    
-    try:
-        # 1. Убираем все скрипты и стили
-        html_clean = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        html_clean = re.sub(r'<style[^>]*>.*?</style>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
-        
-        # 2. Заменяем HTML теги на пробелы
-        html_clean = re.sub(r'<[^>]+>', ' ', html_clean)
-        
-        # 3. Заменяем множественные пробелы и переносы на один пробел
+        # Упрощённый поиск - ищем день и время
+        html_clean = re.sub(r'<[^>]+>', ' ', html)
         html_clean = re.sub(r'\s+', ' ', html_clean)
         
-        # 4. Ищем паттерн активности в очищенном тексте
-        # Паттерн: "Активность" + что-то + время
+        # Паттерны для извлечения сути
         patterns = [
-            r'Активность[^:]{0,5}:[^0-9]{0,20}(\d{1,2}[:.]\d{2})',  # с двоеточием и временем
-            r'Активность[^0-9]{0,20}(\d{1,2}[:.]\d{2})',           # без двоеточия, с временем
-            r'Активность[^А-Яа-я0-9]{0,10}(Вчера|Сегодня|Только что)',  # с Вчера/Сегодня/Только что
+            r'(Активность[^:]{0,5}:?\s*(Вчера|Сегодня|Только что)[^0-9]{0,10}(\d{1,2}[:.]\d{2}))',
+            r'(Активность[^:]{0,5}:?\s*(\d{1,2}[:.]\d{2}))',
         ]
         
         for pattern in patterns:
-            matches = re.findall(pattern, html_clean, re.IGNORECASE)
-            if matches:
-                # Находим полное совпадение
-                full_match = re.search(pattern, html_clean, re.IGNORECASE)
-                if full_match:
-                    activity_text = full_match.group(0).strip()
-                    print(f"✅ Найдена активность: '{activity_text}'")
-                    
-                    # Нормализуем текст
-                    normalized = activity_text
-                    normalized = re.sub(r'\s+', ' ', normalized)  # Убираем лишние пробелы
-                    normalized = normalized.replace('  ', ' ')
-                    
-                    # Если есть время, нормализуем формат
-                    normalized = re.sub(r'(\d{1,2})[.:](\d{2})', r'\1:\2', normalized)
-                    
-                    return normalized
-        
-        # 5. Если не нашли по паттернам, ищем вручную
-        print("🔍 Ручной поиск активности в тексте...")
-        
-        # Разбиваем на предложения
-        sentences = re.split(r'[.!?]', html_clean)
-        
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if 'активность' in sentence.lower() and len(sentence) < 200:
-                # Проверяем что это действительно статус активности
-                has_time = bool(re.search(r'\d{1,2}[:.]\d{2}', sentence))
-                has_day = any(word in sentence.lower() for word in ['вчера', 'сегодня', 'только что'])
+            match = re.search(pattern, html_clean, re.IGNORECASE)
+            if match:
+                full_text = match.group(1)
                 
-                if has_time or has_day:
-                    print(f"✅ Найдена в предложении: '{sentence}'")
-                    
-                    # Нормализуем
-                    normalized = sentence.strip()
-                    normalized = re.sub(r'\s+', ' ', normalized)
-                    normalized = re.sub(r'(\d{1,2})[.:](\d{2})', r'\1:\2', normalized)
-                    
-                    return normalized
+                # Извлекаем СУТЬ: день + время
+                essence = ""
+                
+                # День
+                if 'вчера' in full_text.lower():
+                    essence = "Вчера"
+                elif 'сегодня' in full_text.lower():
+                    essence = "Сегодня"
+                elif 'только что' in full_text.lower():
+                    essence = "Только что"
+                else:
+                    essence = "Недавно"
+                
+                # Время
+                time_match = re.search(r'(\d{1,2})[:.](\d{2})', full_text)
+                if time_match:
+                    time_str = f"{time_match.group(1)}:{time_match.group(2)}"
+                    if essence != "Только что":
+                        essence += f" {time_str}"
+                
+                print(f"✅ Извлечена суть: '{essence}' из текста: '{full_text[:50]}...'")
+                return {
+                    'full_text': full_text.strip(),
+                    'essence': essence,
+                    'is_online': 'только что' in full_text.lower()
+                }
         
-        print("❌ Активность не найдена")
-        return "Активность не определена"
+        print("❌ Не удалось извлечь активность")
+        return {
+            'full_text': "Активность не определена",
+            'essence': "Не определена",
+            'is_online': False
+        }
         
     except Exception as e:
-        print(f"❌ Ошибка извлечения: {e}")
-        return f"Ошибка: {str(e)[:50]}"
+        print(f"❌ Ошибка: {e}")
+        return {
+            'full_text': f"Ошибка: {str(e)[:50]}",
+            'essence': "Ошибка",
+            'is_online': False
+        }
 
-def normalize_for_comparison(text):
-    """Нормализуем текст для сравнения (максимально агрессивно)"""
-    if not text:
-        return ""
-    
-    # Приводим к нижнему регистру
-    normalized = text.lower()
-    
-    # Убираем ВСЕ не-буквы и не-цифры (кроме : и пробела)
-    normalized = re.sub(r'[^\w\s:]', ' ', normalized)
-    
-    # Заменяем все пробельные символы на один пробел
-    normalized = re.sub(r'\s+', ' ', normalized)
-    
-    # Нормализуем время
-    normalized = re.sub(r'(\d{1,2})[.:](\d{2})', r'\1:\2', normalized)
-    
-    # Убираем слова которые не важны
-    remove_words = ['активность', 'activity', 'статус', 'status', 'не', 'удалось', 'определить', 'ошибка', 'error']
-    for word in remove_words:
-        normalized = normalized.replace(word, '')
-    
-    # Убираем лишние пробелы
-    normalized = normalized.strip()
-    
-    return normalized
+def load_last_activity():
+    """Загружаем последнюю активность"""
+    try:
+        with open(STATUS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            print(f"📝 Предыдущая активность: '{data.get('essence', 'Нет')}'")
+            return data
+    except:
+        print("📝 Предыдущая активность: Нет данных")
+        return {
+            'essence': '',
+            'full_text': '',
+            'is_online': False,
+            'timestamp': ''
+        }
 
-def get_status_hash(status_text, active):
-    """Создаём хеш статуса для сравнения"""
-    # Нормализуем ДЛЯ СРАВНЕНИЯ
-    normalized = normalize_for_comparison(status_text)
-    status_string = f"{normalized}_{active}"
+def save_current_activity(activity_data):
+    """Сохраняем текущую активность"""
+    activity_data['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    print(f"   Для сравнения: '{status_text[:50]}...'")
-    print(f"   Нормализовано: '{normalized[:50]}...'")
+    with open(STATUS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(activity_data, f, ensure_ascii=False, indent=2)
     
-    return hashlib.md5(status_string.encode('utf-8')).hexdigest()
+    print(f"💾 Сохранено: '{activity_data['essence']}'")
 
 def check_activity():
     """Проверяем активность"""
     print(f"\n🔍 Проверяем: {URL}")
-    print(f"⏰ Время: {datetime.now().strftime('%H:%M:%S')}")
+    print(f"⏰ Время проверки: {datetime.now().strftime('%H:%M:%S')}")
     
     try:
         headers = {
@@ -176,86 +123,55 @@ def check_activity():
         
         if response.status_code == 200:
             html = response.text
-            
-            # Извлекаем ЧИСТЫЙ текст активности
-            activity_text = extract_pure_activity_text(html)
-            print(f"\n📊 Извлечённая активность: '{activity_text}'")
-            
-            # Проверяем если "Только что"
-            if 'только что' in activity_text.lower():
-                print("🎯 ОБНАРУЖЕНА АКТИВНОСТЬ 'ТОЛЬКО ЧТО'!")
-                return {
-                    'active': True,
-                    'text': activity_text
-                }
-            
-            # Если не онлайн
-            return {
-                'active': False,
-                'text': activity_text
-            }
-            
+            return extract_activity_essence(html)
         else:
-            error_msg = f"❌ Ошибка загрузки: {response.status_code}"
-            print(error_msg)
             return {
-                'active': False,
-                'text': error_msg
+                'full_text': f"Ошибка загрузки: {response.status_code}",
+                'essence': "Ошибка",
+                'is_online': False
             }
             
     except Exception as e:
-        error_msg = f"❌ Ошибка: {str(e)[:100]}"
-        print(error_msg)
         return {
-            'active': False,
-            'text': error_msg
+            'full_text': f"Ошибка: {str(e)[:100]}",
+            'essence': "Ошибка",
+            'is_online': False
         }
 
-def send_telegram_message(message, is_alert=False, force_send=False):
+def send_telegram_message(activity_data, is_alert=False):
     """Отправляем сообщение в Telegram"""
     try:
         current_time = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
         
         if is_alert:
-            telegram_msg = f"""
+            message = f"""
 <b>🚨 АКТИВНОСТЬ ОБНАРУЖЕНА!</b>
 
 📅 <b>Время:</b> {current_time}
 🔗 <b>Ссылка:</b> <a href="{URL}">{URL}</a>
 
 📊 <b>Статус:</b>
-<code>{message}</code>
+<code>{activity_data['full_text']}</code>
 
 🎯 <b>Пользователь в сети!</b>
 """
-        elif force_send:
-            telegram_msg = f"""
-<b>🔄 Первый запуск монитора</b>
-
-📅 <b>Время:</b> {current_time}
-🔗 <b>Ссылка:</b> <a href="{URL}">{URL}</a>
-
-📊 <b>Текущий статус:</b>
-<code>{message}</code>
-
-✅ Монитор запущен и работает.
-Уведомления будут приходить только при изменениях.
-"""
         else:
-            telegram_msg = f"""
-<b>📊 Статус изменился</b>
+            message = f"""
+<b>📊 Активность изменилась</b>
 
 📅 <b>Время:</b> {current_time}
 🔗 <b>Ссылка:</b> <a href="{URL}">{URL}</a>
 
 📝 <b>Новый статус:</b>
-<code>{message}</code>
+<code>{activity_data['full_text']}</code>
+
+🔄 <b>Изменение:</b> {activity_data.get('change_note', '')}
 """
         
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         payload = {
             'chat_id': CHAT_ID,
-            'text': telegram_msg,
+            'text': message,
             'parse_mode': 'HTML',
             'disable_web_page_preview': False
         }
@@ -274,107 +190,109 @@ def send_telegram_message(message, is_alert=False, force_send=False):
         return False
 
 def main():
-    """Основная логика"""
+    """Основная логика - ТОЛЬКО при реальных изменениях"""
     print("\n" + "=" * 60)
     
-    # Загружаем предыдущий статус
-    last_status = load_last_status()
-    last_status_text = last_status.get('status_text', '')
-    last_hash = last_status.get('status_hash', '')
-    
-    print(f"📝 Предыдущий статус: '{last_status_text[:80]}...'")
-    print(f"   Хеш: {last_hash[:16] if last_hash else 'Нет'}...")
-    print(f"   Активен был: {'✅ Да' if last_status.get('active', False) else '❌ Нет'}")
+    # Загружаем предыдущую активность
+    last_activity = load_last_activity()
+    last_essence = last_activity.get('essence', '')
+    last_full_text = last_activity.get('full_text', '')
+    last_was_online = last_activity.get('is_online', False)
     
     # Проверяем текущую активность
-    current_result = check_activity()
+    current_activity = check_activity()
+    current_essence = current_activity.get('essence', '')
+    current_full_text = current_activity.get('full_text', '')
+    current_is_online = current_activity.get('is_online', False)
     
-    # Создаём хеш ТЕКУЩЕГО статуса
-    current_hash = get_status_hash(current_result['text'], current_result['active'])
-    
-    print(f"\n📊 Текущая проверка:")
-    print(f"  • Активен: {'✅ Да' if current_result['active'] else '❌ Нет'}")
-    print(f"  • Статус: '{current_result['text'][:100]}...'")
-    print(f"  • Хеш: {current_hash[:16]}...")
-    
-    # Сравниваем с предыдущим
-    status_changed = current_hash != last_hash
-    
-    print(f"\n⚖️  Сравнение хешей:")
-    print(f"  • Предыдущий: {last_hash[:16] if last_hash else 'Нет'}...")
-    print(f"  • Текущий:    {current_hash[:16]}...")
-    print(f"  • Изменился:  {'✅ ДА' if status_changed else '❌ НЕТ'}")
+    print(f"\n📊 Сравнение активности:")
+    print(f"  • Было: '{last_essence}' ({last_full_text[:50]}...)")
+    print(f"  • Стало: '{current_essence}' ({current_full_text[:50]}...)")
+    print(f"  • Онлайн был: {'✅ Да' if last_was_online else '❌ Нет'}")
+    print(f"  • Онлайн стал: {'✅ Да' if current_is_online else '❌ Нет'}")
     
     # ============================================
-    # НОВАЯ ЛОГИКА: ОТПРАВЛЯЕМ ТОЛЬКО ПРИ РЕАЛЬНЫХ ИЗМЕНЕНИЯХ
+    # КЛЮЧЕВАЯ ЛОГИКА: отправляем ТОЛЬКО при РЕАЛЬНЫХ изменениях
     # ============================================
     
     send_message = False
     is_alert = False
-    force_send = False
+    change_note = ""
     
-    if not last_hash:
-        # ПЕРВЫЙ ЗАПУСК - отправляем приветствие
-        print("\n📝 Это первая проверка")
+    # 1. ПЕРВЫЙ ЗАПУСК (нет предыдущих данных)
+    if not last_essence:
+        print("\n📝 Первый запуск - отправляем текущий статус")
         send_message = True
-        force_send = True
+        change_note = "Первый запуск монитора"
     
-    elif status_changed:
-        # Статус ИЗМЕНИЛСЯ по хешу
-        if current_result['active']:
-            print("\n🚨 ОБНАРУЖЕНА НОВАЯ АКТИВНОСТЬ 'ТОЛЬКО ЧТО'!")
-            send_message = True
-            is_alert = True
-        else:
-            # Проверяем ЧТО именно изменилось
-            print("\n🔍 Анализируем изменение статуса...")
+    # 2. ИЗМЕНИЛСЯ СТАТУС "ОНЛАЙН" (Только что → что-то другое)
+    elif last_was_online and not current_is_online:
+        print("\n📊 Пользователь вышел из сети")
+        send_message = True
+        change_note = "Вышел из сети"
+    
+    # 3. ПОЯВИЛСЯ ОНЛАЙН (что-то другое → Только что)
+    elif not last_was_online and current_is_online:
+        print("\n🚨 ПОЯВИЛСЯ ОНЛАЙН!")
+        send_message = True
+        is_alert = True
+        change_note = "Появился онлайн!"
+    
+    # 4. ИЗМЕНИЛСЯ ДЕНЬ активности (Вчера → Сегодня)
+    elif 'вчера' in last_essence.lower() and 'сегодня' in current_essence.lower():
+        print("\n📅 Изменился день активности (Вчера → Сегодня)")
+        send_message = True
+        change_note = "День изменился: Вчера → Сегодня"
+    
+    # 5. ИЗМЕНИЛОСЬ ВРЕМЯ (при том же дне)
+    elif last_essence != current_essence and not current_is_online and not last_was_online:
+        # Извлекаем время для сравнения
+        last_time_match = re.search(r'(\d{1,2}:\d{2})', last_essence)
+        current_time_match = re.search(r'(\d{1,2}:\d{2})', current_essence)
+        
+        if last_time_match and current_time_match:
+            last_time = last_time_match.group(1)
+            current_time = current_time_match.group(1)
             
-            # Извлекаем время из текущего и предыдущего статуса
-            current_time_match = re.search(r'(\d{1,2}:\d{2})', current_result['text'])
-            last_time_match = re.search(r'(\d{1,2}:\d{2})', last_status_text)
-            
-            current_day_match = re.search(r'(Вчера|Сегодня|Только что)', current_result['text'], re.IGNORECASE)
-            last_day_match = re.search(r'(Вчера|Сегодня|Только что)', last_status_text, re.IGNORECASE)
-            
-            current_time = current_time_match.group(1) if current_time_match else None
-            last_time = last_time_match.group(1) if last_time_match else None
-            current_day = current_day_match.group(1) if current_day_match else None
-            last_day = last_day_match.group(1) if last_day_match else None
-            
-            print(f"   Сравнение деталей:")
-            print(f"   • Было: день='{last_day}', время='{last_time}'")
-            print(f"   • Стало: день='{current_day}', время='{current_time}'")
-            
-            # Отправляем только если изменился день ИЛИ время
-            if (current_day and last_day and current_day.lower() != last_day.lower()) or \
-               (current_time and last_time and current_time != last_time):
-                print("📊 Статус РЕАЛЬНО изменился (день или время)")
+            if last_time != current_time:
+                print(f"\n⏰ Изменилось время: {last_time} → {current_time}")
                 send_message = True
-                is_alert = False
+                change_note = f"Время изменилось: {last_time} → {current_time}"
             else:
-                print("ℹ️ Статус технически изменился, но не существенно")
-                send_message = False
-    else:
-        print("\n✅ Статус НЕ изменился (всё то же самое)")
+                print(f"\nℹ️ Время не изменилось: {last_time}")
+        else:
+            print(f"\n📊 Изменилась суть активности: '{last_essence}' → '{current_essence}'")
+            send_message = True
+            change_note = f"Активность изменилась"
     
-    # Отправляем если нужно
+    # 6. ОШИБКА → НОРМА или НОРМА → ОШИБКА
+    elif ('ошибка' in last_essence.lower() and 'ошибка' not in current_essence.lower()) or \
+         ('ошибка' not in last_essence.lower() and 'ошибка' in current_essence.lower()):
+        print(f"\n⚠️ Изменился статус ошибки")
+        send_message = True
+        change_note = "Статус ошибки изменился"
+    
+    else:
+        print(f"\n✅ Активность НЕ изменилась: '{current_essence}'")
+    
+    # Добавляем заметку об изменении
+    if change_note:
+        current_activity['change_note'] = change_note
+    
+    # Отправляем сообщение если нужно
     if send_message:
-        print(f"\n📨 Отправляем сообщение...")
-        success = send_telegram_message(
-            current_result['text'], 
-            is_alert=is_alert, 
-            force_send=force_send
-        )
+        print(f"\n📨 Отправляем уведомление...")
+        success = send_telegram_message(current_activity, is_alert=is_alert)
         
         if success:
-            print("✅ Сообщение отправлено!")
+            print("✅ Уведомление отправлено!")
         else:
             print("❌ Не удалось отправить")
     else:
-        print("\n📭 Сообщение НЕ отправляется (нет значимых изменений)")
+        print("\n📭 Уведомление НЕ отправляется (активность не изменилась)")
     
-    # Всегда сохраняем статус
-    save_status(current_result['text'], current_result['active'], current_hash)
+    # Всегда сохраняем текущую активность
+    save_current_activity(current_activity)
     
     print("\n" + "=" * 60)
     print("✅ Проверка завершена")
